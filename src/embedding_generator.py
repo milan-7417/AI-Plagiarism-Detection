@@ -1,203 +1,98 @@
+"""
+Semantrix BERT embeddings — Hugging Face ZeroGPU compatible.
 
+Import spaces before torch. The model is loaded at module scope and
+placed on "cuda"; ZeroGPU intercepts this placement during startup.
+Call generate_embeddings only from the @spaces.GPU-decorated Gradio
+event handler in app.py.
+"""
+import spaces  # Must precede torch.
 import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModel
 
-
-# --------------------------------------------------
-# Configuration
-# --------------------------------------------------
-
 MODEL_NAME = "google-bert/bert-base-uncased"
-
-BATCH_SIZE = 2
+BATCH_SIZE = 8
 MAX_LENGTH = 128
 
+print(f"Loading tokenizer: {MODEL_NAME}")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
-# --------------------------------------------------
-# Load pretrained BERT model
-# --------------------------------------------------
+print(f"Loading model: {MODEL_NAME}")
+model = AutoModel.from_pretrained(MODEL_NAME)
+model.eval()
+
+# On ZeroGPU this is intercepted by the spaces package at startup.
+# On a local CPU machine it correctly resolves to "cpu".
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+print(f"BERT ready on configured device: {device}")
+
 
 def load_embedding_model():
-    """
-    Load the pretrained BERT Base tokenizer and model.
-
-    Uses CUDA if available; otherwise, uses CPU.
-
-    Returns:
-        tokenizer
-        model
-        device
-    """
-
-    print("Loading BERT tokenizer...")
-
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-
-    print("Loading pretrained BERT model...")
-
-    # Load model weights
-    model = AutoModel.from_pretrained(
-        MODEL_NAME,
-        low_cpu_mem_usage=True
-    )
-
-    # Set evaluation mode
-    model.eval()
-
-    # Select available device
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() else "cpu"
-    )
-
-    # Move model to selected device
-    model.to(device)
-
-    print(f"BERT model loaded successfully on: {device}")
-
+    """Backward-compatible accessor; model is already loaded at startup."""
     return tokenizer, model, device
 
 
-# --------------------------------------------------
-# Generate sentence embeddings
-# --------------------------------------------------
+def _get_sentences(processed_sentences):
+    sentences = []
+    for item in processed_sentences or []:
+        text = item.get("text", "") if isinstance(item, dict) else str(item)
+        text = text.strip()
+        if text:
+            sentences.append(text)
+    return sentences
+
 
 def generate_embeddings(
     processed_sentences,
-    tokenizer,
-    model,
-    device
+    tokenizer_instance=None,
+    model_instance=None,
+    target_device=None,
 ):
     """
-    Generate sentence embeddings using pretrained BERT.
-
-    Mean pooling is applied over token embeddings,
-    excluding padding tokens.
-
-    Args:
-        processed_sentences: List of dictionaries containing
-                             sentence text, or list of strings.
-        tokenizer: BERT tokenizer.
-        model: Pretrained BERT model.
-        device: CPU or CUDA device.
-
-    Returns:
-        Tensor of normalized sentence embeddings.
-        Shape: (number_of_sentences, hidden_size)
+    Mean-pool non-padding BERT token embeddings and L2-normalize.
+    Returns a CPU tensor (N, hidden_size), never a CUDA tensor.
+    Must be called inside the ZeroGPU-decorated event function.
     """
+    tokenizer_instance = tokenizer_instance or tokenizer
+    model_instance = model_instance or model
+    target_device = target_device or device
 
-    # Handle empty input
-    if not processed_sentences:
-        hidden_size = model.config.hidden_size
+    sentences = _get_sentences(processed_sentences)
+    hidden_size = model_instance.config.hidden_size
 
-        return torch.empty(
-            (0, hidden_size),
-            dtype=torch.float32
-        )
-
-    # Extract sentence text
-    sentences = []
-
-    for item in processed_sentences:
-
-        if isinstance(item, dict):
-            sentence = item["text"]
-        else:
-            sentence = str(item)
-
-        sentence = sentence.strip()
-
-        if sentence:
-            sentences.append(sentence)
-
-    # Handle input containing only empty sentences
     if not sentences:
-        hidden_size = model.config.hidden_size
+        return torch.empty((0, hidden_size), dtype=torch.float32)
 
-        return torch.empty(
-            (0, hidden_size),
-            dtype=torch.float32
-        )
+    embeddings = []
+    model_instance.eval()
 
-    embeddings_list = []
-
-    model.eval()
-
-    # Disable gradient calculation for inference
     with torch.inference_mode():
-
-        # Process sentences in small batches
         for start in range(0, len(sentences), BATCH_SIZE):
-
-            batch_sentences = sentences[
-                start:start + BATCH_SIZE
-            ]
-
-            # Tokenize sentences
-            inputs = tokenizer(
-                batch_sentences,
+            batch = sentences[start:start + BATCH_SIZE]
+            inputs = tokenizer_instance(
+                batch,
                 padding=True,
                 truncation=True,
                 max_length=MAX_LENGTH,
-                return_tensors="pt"
+                return_tensors="pt",
             )
+            inputs = {key: value.to(target_device) for key, value in inputs.items()}
 
-            # Move input tensors to selected device
-            inputs = {
-                key: value.to(device)
-                for key, value in inputs.items()
-            }
+            outputs = model_instance(**inputs)
+            token_vectors = outputs.last_hidden_state
+            mask = inputs["attention_mask"].unsqueeze(-1).to(token_vectors.dtype)
 
-            # Forward pass through BERT
-            outputs = model(**inputs)
+            pooled = (token_vectors * mask).sum(dim=1)
+            denominator = mask.sum(dim=1).clamp(min=1e-9)
+            pooled = pooled / denominator
+            pooled = F.normalize(pooled, p=2, dim=1)
 
-            # Extract token embeddings
-            token_embeddings = outputs.last_hidden_state
+            # ZeroGPU decorated functions cross a process boundary:
+            # return CPU tensors, not CUDA tensors.
+            embeddings.append(pooled.float().cpu())
 
-            # Attention mask excludes padding tokens
-            attention_mask = inputs["attention_mask"]
+            del inputs, outputs, token_vectors, mask, pooled, denominator
 
-            mask = attention_mask.unsqueeze(-1).to(
-                dtype=token_embeddings.dtype
-            )
-
-            # Mean pooling
-            sum_embeddings = torch.sum(
-                token_embeddings * mask,
-                dim=1
-            )
-
-            sum_mask = torch.clamp(
-                mask.sum(dim=1),
-                min=1e-9
-            )
-
-            sentence_embeddings = (
-                sum_embeddings / sum_mask
-            )
-
-            # L2 normalization
-            sentence_embeddings = F.normalize(
-                sentence_embeddings,
-                p=2,
-                dim=1
-            )
-
-            # Move embeddings to CPU to reduce GPU memory usage
-            embeddings_list.append(
-                sentence_embeddings.cpu()
-            )
-
-            # Release temporary tensors
-            del inputs
-            del outputs
-            del token_embeddings
-            del sentence_embeddings
-
-    # Combine all batches
-    final_embeddings = torch.cat(
-        embeddings_list,
-        dim=0
-    )
-
-    return final_embeddings
+    return torch.cat(embeddings, dim=0)

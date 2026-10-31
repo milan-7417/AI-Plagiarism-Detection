@@ -1,6 +1,8 @@
-gradio
-torch
-transformers
+# Semantrix — Hugging Face Gradio + ZeroGPU
+gradio>=5.0
+spaces
+torch>=2.8.0
+transformers>=4.45.0,<6
 accelerate
 huggingface-hub
 pandas
