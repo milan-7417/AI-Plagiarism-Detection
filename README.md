@@ -1,18 +1,7 @@
 # 🔍 Semantrix
 ### AI-Powered Document Similarity & Paraphrase Detection
 
-<p align="center">
-  <strong>Understand Similarity Beyond Words.</strong>
-</p>
 
-<p align="center">
-  <a href="https://huggingface.co/spaces/milan-123/Semantrix">
-    <img src="https://img.shields.io/badge/Live%20Demo-Hugging%20Face-yellow?style=for-the-badge&logo=huggingface" alt="Live Demo"/>
-  </a>
-  <a href="https://github.com/milan-7417/AI-Plagiarism-Detection">
-    <img src="https://img.shields.io/badge/GitHub-Repository-black?style=for-the-badge&logo=github" alt="GitHub Repository"/>
-  </a>
-</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python" alt="Python"/>
@@ -55,10 +44,9 @@ Try Semantrix directly without installing anything:
 
 ## 🖥️ Application Preview
 
-<!-- Add your application screenshots here -->
 
 <p align="center">
-  <img src="assets/home.png" width="85%" alt="Semantrix Home Interface"/>
+  <img src=assets\home (3).png width="85%" alt="Semantrix Home Interface"/>
 </p>
 
 <p align="center">
