@@ -46,14 +46,12 @@ Try Semantrix directly without installing anything:
 
 
 <p align="center">
-  <img src=assets/home (3).png width="85%" alt="Semantrix Home Interface"/>
+  <img src="assets/home (3).png" width="85%" alt="Semantrix Home Interface"/>
 </p>
 
 <p align="center">
   <em>Semantrix application interface</em>
 </p>
-
-> Replace `assets/home.png` with the actual path of your screenshot, or add more screenshots of the results dashboard and document comparison interface.
 
 ## 🧠 How Semantrix Works
 
