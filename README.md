@@ -46,7 +46,7 @@ Try Semantrix directly without installing anything:
 
 
 <p align="center">
-  <img src=assets\home (3).png width="85%" alt="Semantrix Home Interface"/>
+  <img src=assets/home (3).png width="85%" alt="Semantrix Home Interface"/>
 </p>
 
 <p align="center">
